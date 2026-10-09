@@ -441,3 +441,15 @@ GIT_PROXY=http://127.0.0.1:10080 bash $S/scripts/start.sh
 - **`references/legacy-token-capture/`** —— `get_token_netlog.mjs`（netlog 提取 Bearer，容错解析）、`get_token_cdp.mjs`、`enable_cdp.sh`（以抓包参数重启 Chromium 应用）
 
 **当前架构下这套流程已不需要**（hub 用 OAuth 加账号 + 自动保活），保留是为了复用「任意 Electron/Chromium 应用抓 `Authorization`」与「本机凭据取证」这两类手段。
+
+## 依赖同步
+
+本仓库 `promo-page/assets/{app.js,style.css,icons.js}` 是 [iskill-promo-page](https://github.com/aispin/iskill-promo-page)
+模板引擎的 vendored 副本（锁定版本见 `package.json` 的 `iskillDeps`），**不要手改**——
+去真源仓库改并升 `@iskill-version`，再用 iskill-dep-sync 同步回来（本机无该工具时按下面自举）：
+
+```bash
+T="$HOME/.workbuddy/skills/iskill-dep-sync/scripts/skill-deps.mjs"
+[ -f "$T" ] || { TMP="$(mktemp -d)"; curl -fsSL "https://raw.githubusercontent.com/aispin/iskill-dep-sync/HEAD/scripts/skill-deps.mjs" -o "$TMP/skill-deps.mjs"; T="$TMP/skill-deps.mjs"; }
+node "$T" check "$(pwd)"     # 漂移检测；node "$T" sync "$(pwd)" 恢复/升级；node "$T" env "$(pwd)" 冷启动自检
+```
