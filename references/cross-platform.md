@@ -43,7 +43,7 @@ scripts/*.sh  ─┘   （唯一真源）      └─→ （无参数 = 交互�
 | 存活探测 | `os.kill(pid, 0)` + 排僵尸 | `OpenProcess` + `GetExitCodeProcess == STILL_ACTIVE` | `pid_alive()` |
 | 端口 → 进程 | `lsof -nP -iTCP:N -sTCP:LISTEN -Fpc` | `netstat -ano` + `tasklist` 取名 | `port_owners()` |
 | 文件权限收紧 | `os.chmod(f, 0o600)` | 跳过（Windows 用 ACL，chmod 无意义） | `do_start()` |
-| 打开浏览器 | `open` / `xdg-open` | `os.startfile` | `open_url()`（首选 `webbrowser`） |
+| 打开浏览器 | `open` / `xdg-open`；开前先探 Safari/Chrome/Edge/Brave/Arc 是否已有同址 tab，有则跳过（Apple Events 被拒等失败一律降级为正常打开） | `os.startfile`（无轻量 tab 枚举手段，跳过去重，直接开） | `open_url()`（首选 `webbrowser`） |
 | 找 npm | `shutil.which` + Homebrew 两条 | `shutil.which("npm.cmd")` | `find_npm()` |
 | PATH 分隔符 | `:` | `;` | `os.pathsep` |
 | 控制台编码 | 本来就是 UTF-8 | 默认 GBK → `SetConsoleOutputCP(65001)` | `_init_console()` |

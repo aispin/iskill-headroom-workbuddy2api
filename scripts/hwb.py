@@ -611,7 +611,46 @@ def fetch_json(url: str, timeout: float = 5.0):
 
 # ─────────────────────────────────────────────────────────────
 # 浏览器
+_MACOS_TAB_PROBE_APPS = (
+    ("Safari", 'tell application "Safari" to get URL of every tab of every window'),
+    ("Google Chrome", 'tell application "Google Chrome" to get URL of tabs of windows'),
+    ("Microsoft Edge", 'tell application "Microsoft Edge" to get URL of tabs of windows'),
+    ("Brave Browser", 'tell application "Brave Browser" to get URL of tabs of windows'),
+    ("Arc", 'tell application "Arc" to get URL of tabs of windows'),
+)
+
+
+def _url_already_open(url: str) -> bool:
+    """macOS：常用浏览器里是否已有同一地址的标签页（避免重复开 tab）。
+
+    只探当前正在运行的浏览器——对未运行的应用跑 osascript 会把它拉起来。
+    查询失败（未授权自动化等）一律当「没开过」，回落到正常打开。
+    """
+    if not IS_MACOS:
+        return False
+    m = re.match(r"(https?://[^/]+)", url)
+    if not m:
+        return False
+    origin = m.group(1)
+    for app, script in _MACOS_TAB_PROBE_APPS:
+        try:
+            if subprocess.run(["pgrep", "-x", app], capture_output=True).returncode != 0:
+                continue
+            r = subprocess.run(["osascript", "-e", script],
+                               capture_output=True, text=True, timeout=5)
+            if r.returncode == 0 and origin in r.stdout:
+                return True
+        except Exception:
+            continue
+    return False
+
+
 def open_url(url: str) -> None:
+    try:
+        if _url_already_open(url):
+            return
+    except Exception:
+        pass
     try:
         if webbrowser.open(url):
             return
@@ -745,13 +784,16 @@ def do_start(open_console: bool = True, open_browser: bool = True) -> int:
         f"HEADROOM_HOST={HEADROOM_HOST}",
         f"HEADROOM_PORT={HEADROOM_PORT}",
         f"OPENAI_TARGET_API_URL=http://127.0.0.1:{HUB_PORT}",
+        # Anthropic 协议入站（Claude Code 的 /v1/messages）走这个 target；
+        # 不配会回落到 api.anthropic.com，客户端 key 被官方 401，表现为「Not logged in」。
+        f"ANTHROPIC_TARGET_API_URL=http://127.0.0.1:{HUB_PORT}",
         "HEADROOM_TELEMETRY=off",
         f"HEADROOM_MODE={HEADROOM_MODE}",
     ]
     if os.environ.get("HEADROOM_BUDGET"):
         lines.append(f"HEADROOM_BUDGET={os.environ['HEADROOM_BUDGET']}")
     HEADROOM_ENV.write_text("\n".join(lines) + "\n", encoding="utf-8")
-    ok(f"headroom.env 已生成（OPENAI_TARGET_API_URL=http://127.0.0.1:{HUB_PORT}，mode={HEADROOM_MODE}）")
+    ok(f"headroom.env 已生成（OPENAI/ANTHROPIC_TARGET_API_URL=http://127.0.0.1:{HUB_PORT}，mode={HEADROOM_MODE}）")
     if HEADROOM_MODE == "cache":
         info("cache 模式（推荐，官方 coding 预设默认）：守住上游 prompt cache（命中单价仅为未命中的 2%），"
              "同时压缩每轮新到的增量；「已省 token」多为 0 属正常 —— 那部分是冻结前缀，省在缓存折扣里")
