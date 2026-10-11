@@ -72,6 +72,13 @@ export interface HeadroomStats {
   _error?: string;
 }
 
+export interface Versions {
+  /** 本控制台技能自身版本（package.json 顶层 version） */
+  skill: string;
+  hub: { running: string; pin: string };
+  headroom: { running: string; locked: string };
+}
+
 export interface StatusPayload {
   now: string;
   runtime: string;
@@ -87,6 +94,7 @@ export interface StatusPayload {
     scheduler?: unknown;
   };
   headroom: { reachable: boolean; stats: HeadroomStats | null };
+  versions?: Versions;
   client: {
     base_url: string;
     chat_url: string;

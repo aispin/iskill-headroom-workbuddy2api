@@ -12,9 +12,11 @@
   - 写入：OAuth 加账号（服务端代持面板会话，用户只点一下）、手动保活 refresh
 
 账号管理、API Key 管理、签到任务等深度操作，跳转 hub 自己的看板完成。
+跳转走本控制台的反向代理（/hub）：自动注入面板会话，用户无需再输面板密码。
 """
 
 import argparse
+import glob
 import json
 import os
 import socket
@@ -229,6 +231,52 @@ def tail_file(path, lines=120):
         return "(读取日志失败：%s)" % exc
 
 
+def skill_versions():
+    """package.json 是唯一定版事实源：skill 版本（顶层 version）+ runtime 锁。"""
+    try:
+        with open(os.path.join(SKILL_DIR, "package.json"), encoding="utf-8") as fh:
+            pkg = json.load(fh)
+    except Exception:
+        pkg = {}
+    runtime = pkg.get("runtime") or {}
+    pip_spec = str((runtime.get("headroom") or {}).get("pip_spec") or "")
+    pin = str((runtime.get("hub") or {}).get("pin") or "")
+    return {
+        "skill": str(pkg.get("version") or ""),
+        "hub_pin": pin[:7],
+        "headroom_locked": pip_spec.split("==", 1)[1].strip() if "==" in pip_spec else "",
+    }
+
+
+def headroom_installed_version():
+    """headroom-ai 的实际安装版本。控制台进程可能不跑在 venv 里，优先读元数据，兜底扫 dist-info。"""
+    try:
+        import importlib.metadata as md
+
+        return md.version("headroom-ai")
+    except Exception:
+        pass
+    for hits in glob.glob(os.path.join(RUNTIME, "venv", "lib", "python*", "site-packages",
+                                       "headroom_ai-*.dist-info")):
+        name = os.path.basename(hits)
+        return name[len("headroom_ai-"):-len(".dist-info")]
+    return ""
+
+
+# /updates 只报最近一次检查结果（只读、便宜），但每次轮询都打一发没必要 —— 60s 缓存
+_hub_version_cache = {"value": "", "at": 0.0}
+
+
+def hub_running_version(hub):
+    if time.time() - _hub_version_cache["at"] < 60:
+        return _hub_version_cache["value"]
+    resp = hub.panel("/updates")
+    ver = str(resp.get("current_version") or "") if isinstance(resp, dict) else ""
+    if ver and isinstance(resp, dict) and "_error" not in resp:
+        _hub_version_cache.update(value=ver, at=time.time())
+    return ver
+
+
 def build_status():
     env = read_kv(HUB_ENV)
     hub_port = int(env.get("HUB_PORT") or 8788)
@@ -274,6 +322,7 @@ def build_status():
         out_hub["models"] = [m.get("id") for m in (models_resp.get("data") or [])] \
             if isinstance(models_resp, dict) else []
         out_hub["models_error"] = models_resp.get("_error") if isinstance(models_resp, dict) else None
+        out_hub["running_version"] = hub_running_version(hub)
 
     headroom = {"reachable": False, "stats": None}
     if port_open(headroom_port):
@@ -283,17 +332,26 @@ def build_status():
         except Exception as exc:
             headroom["stats"] = {"_error": str(exc)}
 
+    _ver = skill_versions()
     return {
         "now": time.strftime("%Y-%m-%d %H:%M:%S"),
         "services": services,
         "hub": out_hub,
         "headroom": headroom,
+        "versions": {
+            "skill": _ver["skill"],
+            "hub": {"running": out_hub.get("running_version") or "", "pin": _ver["hub_pin"]},
+            "headroom": {
+                "running": headroom_installed_version(),
+                "locked": _ver["headroom_locked"],
+            },
+        },
         "client": {
             "base_url": "http://localhost:%d/v1" % headroom_port,
             "chat_url": "http://localhost:%d/v1/chat/completions" % headroom_port,
             "api_key": api_key,
             "api_key_source": key_source,
-            "panel_url": "http://127.0.0.1:%d/" % hub_port,
+            "panel_url": "/hub",
             "panel_password": panel_pw,
         },
         "runtime": RUNTIME,
@@ -343,10 +401,10 @@ class Handler(BaseHTTPRequestHandler):
                           effective_api_key()[0])
 
     def _serve_static(self, path):
-        """托管 dashboard/dist 构建产物；未知路径回退 index.html（SPA）。"""
+        """托管 dashboard/dist 构建产物。命中返回 True；未命中返回 False（交给 hub 代理）。"""
         index = os.path.join(DIST_DIR, "index.html")
         if not os.path.isfile(index):
-            return self._send(
+            self._send(
                 503,
                 "控制台前端还没构建。\n\n"
                 "在本机执行一次：\n"
@@ -355,26 +413,77 @@ class Handler(BaseHTTPRequestHandler):
                 "期望文件：%s\n" % (SKILL_DIR, index),
                 "text/plain; charset=utf-8",
             )
+            return True
 
         rel = urllib.parse.unquote(path).lstrip("/") or "index.html"
         target = os.path.normpath(os.path.join(DIST_DIR, rel))
         # 目录穿越防护
         if target != DIST_DIR and not target.startswith(DIST_DIR + os.sep):
-            return self._send(403, {"error": "forbidden"})
+            self._send(403, {"error": "forbidden"})
+            return True
 
-        if os.path.isfile(target):
-            ctype = MIME.get(os.path.splitext(target)[1].lower(), "application/octet-stream")
-            with open(target, "rb") as fh:
-                return self._send(200, fh.read(), ctype)
+        if not os.path.isfile(target):
+            return False
 
-        with open(index, "rb") as fh:
-            return self._send(200, fh.read(), MIME[".html"])
+        ctype = MIME.get(os.path.splitext(target)[1].lower(), "application/octet-stream")
+        with open(target, "rb") as fh:
+            self._send(200, fh.read(), ctype)
+        return True
+
+    # -- hub 反向代理 --
+    # hub 有意不支持 URL 传面板 token（header-only，防泄漏进浏览器历史/Referer/日志），
+    # 且其 SPA 全部用绝对路径 fetch、无 SSE/WebSocket —— 本控制台做一层透传并注入
+    # X-Panel-Token，即可免登录直达 hub 面板，token 不进 URL。拿不到会话时按原样透传，
+    # hub 前端会自己显示登录页（优雅降级）。
+    _PROXY_FWD_HEADERS = ("Content-Type", "ETag", "Last-Modified", "Cache-Control")
+
+    def _proxy_hub(self, target):
+        hub = self._hub()
+        body = None
+        if self.command in ("POST", "PUT", "PATCH"):
+            length = int(self.headers.get("Content-Length") or 0)
+            body = self.rfile.read(length) if length else None
+        try:
+            tok = hub._panel_token()
+        except Exception:
+            tok = ""
+        headers = {"X-Panel-Token": tok} if tok else {}
+        ctype = self.headers.get("Content-Type")
+        if ctype:
+            headers["Content-Type"] = ctype
+        req = urllib.request.Request(hub.base + target, data=body, headers=headers,
+                                     method=self.command)
+        try:
+            with _NO_PROXY_OPENER.open(req, timeout=120) as resp:
+                self._proxy_response(resp.status, resp.read(), resp.headers)
+        except urllib.error.HTTPError as exc:
+            self._proxy_response(exc.code, exc.read(), exc.headers)
+        except Exception as exc:
+            self._send(502, {"error": "hub 代理失败：%s" % exc})
+
+    def _proxy_response(self, status, data, headers):
+        self.send_response(status)
+        for name in self._PROXY_FWD_HEADERS:
+            val = headers.get(name)
+            if val:
+                self.send_header(name, val)
+        self.send_header("Content-Length", str(len(data)))
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("Permissions-Policy", 'clipboard-write=*')
+        self.end_headers()
+        try:
+            self.wfile.write(data)
+        except BrokenPipeError:
+            pass
 
     # -- 路由 --
     def do_GET(self):
         parsed = urllib.parse.urlparse(self.path)
         path = parsed.path
         query = urllib.parse.parse_qs(parsed.query)
+
+        if path == "/hub":
+            return self._proxy_hub("/")
 
         if path == "/api/status":
             try:
@@ -396,7 +505,9 @@ class Handler(BaseHTTPRequestHandler):
         if path.startswith("/api/"):
             return self._send(404, {"error": "not found"})
 
-        return self._serve_static(path)
+        if self._serve_static(path):
+            return
+        return self._proxy_hub(self.path)
 
     def do_POST(self):
         parsed = urllib.parse.urlparse(self.path)
@@ -437,7 +548,10 @@ class Handler(BaseHTTPRequestHandler):
             except Exception as exc:
                 return self._send(500, {"error": str(exc)})
 
-        return self._send(404, {"error": "not found"})
+        parsed = urllib.parse.urlparse(self.path)
+        if parsed.path.startswith("/api/"):
+            return self._send(404, {"error": "not found"})
+        return self._proxy_hub(self.path)
 
 
 def main():

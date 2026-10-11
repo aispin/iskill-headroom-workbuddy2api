@@ -207,7 +207,9 @@ Headroom 自己有账本：`~/.headroom/proxy_savings.json`（汇总，**会滞�
 ```
 
 ### 本技能控制台（`:8786`）— 图形操作台
-一屏看清三跳链路，并能一键 OAuth 加账号。**`start` 默认会把它一并拉起并自动在默认浏览器打开**——双击启动器即可获得「服务 + 控制台」全套；不想要就 `start --no-console`。只用命令行 + hub 看板也能跑通，它的价值是把「翻 hub 看板找状态」变成「一屏可见」。
+一屏看清三跳链路（含 skill / hub / headroom 版本号与锁定版，偏离锁定黄色提示），并能一键 OAuth 加账号。**`start` 默认会把它一并拉起并自动在默认浏览器打开**——双击启动器即可获得「服务 + 控制台」全套；不想要就 `start --no-console`。只用命令行 + hub 看板也能跑通，它的价值是把「翻 hub 看板找状态」变成「一屏可见」。
+
+「hub 面板」按钮走控制台的反向代理（`/hub`）：自动注入面板会话，无需再输面板密码；账号管理、密钥、签到等深度操作直达。代理拿不到会话时按原样透传，hub 自己的登录页照常出现（优雅降级）。
 
 技术栈：**React 19 + Vite 8 + TypeScript + Tailwind CSS 4**（源码在 `dashboard/`，构建产物 `dashboard/dist/` 由 `scripts/dashboard.py`（纯 stdlib）单端口托管）。**运行时只需要 Python，不需要 Node**——Node 只在构建前端时用。
 

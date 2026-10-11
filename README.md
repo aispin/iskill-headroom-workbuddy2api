@@ -12,7 +12,7 @@ WorkBuddy 客户端 → Headroom(:8787 守住缓存 + 压增量) → workbuddy2a
 |---|---|---|
 | `8788` | **workbuddy2api-hub** | 私有协议转 OpenAI + 看板 OAuth 加账号 + 多账号双区域调度 + 每日保活 —— **没有它，内置模型根本接不出来** |
 | `8787` | **Headroom** | 冻结历史前缀**守住上游 prompt cache**（命中 = 未命中的 2%），只压**最新那条增量** —— 让会话**跑得更远、更省** |
-| `8786` | 本技能控制台 | 链路健康 / 加账号 / 生效 Key / 日志（`start` 默认一并拉起并自动开浏览器） |
+| `8786` | 本技能控制台 | 链路健康 / 各组件版本号 / 加账号 / 生效 Key / 日志；「hub 面板」经控制台反向代理免登录直达（`start` 默认一并拉起并自动开浏览器） |
 
 > 完整操作说明见 `SKILL.md`；省 token 方案的调研归档在 `docs/token-savings-research.md`
 > （headroom 官方文档 + 本机实测 + 开源横向对比，结论：真正的杠杆是**上游缓存命中率**，不是压缩比）。
@@ -61,7 +61,7 @@ WorkBuddy 客户端 → Headroom(:8787 守住缓存 + 压增量) → workbuddy2a
 |---|---|
 | `test-compression.sh` | Headroom 压缩 A/B 对照（临时实例，跑完自清理） |
 | `compression_probe.py` | 压缩探针（结构化输出压缩前后差异） |
-| `dashboard.py` | 控制台后端（纯 stdlib，127.0.0.1:8786，托管前端产物 + `/api/*`）—— 这个是跨平台的，由 `hwb.py dashboard` 调起 |
+| `dashboard.py` | 控制台后端（纯 stdlib，127.0.0.1:8786，托管前端产物 + `/api/*`，并反向代理 hub 面板实现免登录）—— 这个是跨平台的，由 `hwb.py dashboard` 调起 |
 
 > Windows 上不需要这些 `.sh`：等价写法是 `powershell -File hwb.ps1 <动作>`
 > 或直接 `py -3 scripts\hwb.py <动作>`。

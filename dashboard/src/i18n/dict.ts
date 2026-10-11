@@ -6,14 +6,14 @@
 
 const zh = {
   // ── 顶栏 ──
-  "app.title": "ISKILL-HEADROOM-WORKBUDDY 控制台",
+  "app.title": "ISKILL-HEADROOM-WORKBUDDY2API 控制台",
   "app.desc":
     "把 WorkBuddy 桌面端内置模型接成人人可用的 OpenAI 兼容 API —— hub 让它「用得上」（协议转换 / 看板 OAuth 加账号 / 多账号调度），headroom 让它「跑得远」（守住上游缓存 + 只压最新增量）。",
   "app.updatedAt": "更新于 {now} · 运行时 {runtime}",
   "app.statusError": "读取状态失败：{error}",
   "app.loading": "加载中…",
   "app.hubPanel": "hub 面板 ↗",
-  "app.hubPanelTitle": "打开 hub 原生看板：{url}",
+  "app.hubPanelTitle": "打开 hub 原生看板（控制台代理 · 免登录）",
   "app.autoOn": "自动刷新：开",
   "app.autoOff": "自动刷新：关",
   // 页脚拆三段，中间那段是超链接
@@ -58,7 +58,11 @@ const zh = {
   "chain.client.title": "WorkBuddy 客户端",
   "chain.client.desc": "自定义模型",
   "chain.headroom.desc": ":{port} 缓存守护 + 压增量{pid}",
+  "chain.headroom.ver": "v{ver} · 锁 {locked}",
+  "chain.headroom.lockOnly": "锁 {locked}",
   "chain.hub.desc": ":{port} 协议转换 / 多账号{pid}",
+  "chain.hub.ver": "v{ver} · 锁 {pin}",
+  "chain.hub.pinOnly": "锁 {pin}",
   "chain.pid": "　PID {pid}",
   "chain.model.title": "官方内置模型",
   "chain.model.desc": "{realm}（{domain}）",
@@ -162,14 +166,14 @@ export type Dict = Record<keyof typeof zh, string>;
 
 const en: Dict = {
   // ── Header ──
-  "app.title": "ISKILL-HEADROOM-WORKBUDDY Console",
+  "app.title": "ISKILL-HEADROOM-WORKBUDDY2API Console",
   "app.desc":
     "Turns WorkBuddy's built-in models into an OpenAI-compatible API anyone can use — the hub makes them usable (protocol translation / dashboard OAuth / multi-account scheduling), Headroom makes them last (cache-warm prefix + delta-only compression).",
   "app.updatedAt": "Updated {now} · runtime {runtime}",
   "app.statusError": "Failed to read status: {error}",
   "app.loading": "Loading…",
   "app.hubPanel": "hub panel ↗",
-  "app.hubPanelTitle": "Open the native hub dashboard: {url}",
+  "app.hubPanelTitle": "Open the native hub dashboard via the console proxy (no login)",
   "app.autoOn": "Auto-refresh: on",
   "app.autoOff": "Auto-refresh: off",
   "app.footer.pre":
@@ -215,7 +219,11 @@ const en: Dict = {
   "chain.client.title": "WorkBuddy client",
   "chain.client.desc": "custom model",
   "chain.headroom.desc": ":{port} cache-warm + delta compression{pid}",
+  "chain.headroom.ver": "v{ver} · lock {locked}",
+  "chain.headroom.lockOnly": "lock {locked}",
   "chain.hub.desc": ":{port} protocol translation / multi-account{pid}",
+  "chain.hub.ver": "v{ver} · pin {pin}",
+  "chain.hub.pinOnly": "pin {pin}",
   "chain.pid": "　PID {pid}",
   "chain.model.title": "built-in models",
   "chain.model.desc": "{realm} ({domain})",

@@ -56,7 +56,14 @@ export default function App() {
             className="h-10 w-10 shrink-0"
           />
           <div className="min-w-0">
-            <h1 className="m-0 text-[19px] font-semibold tracking-wide">{t("app.title")}</h1>
+            <h1 className="m-0 text-[19px] font-semibold tracking-wide">
+              {t("app.title")}
+              {data?.versions?.skill && (
+                <span className="ml-2 font-mono text-[12px] font-normal text-muted">
+                  v{data.versions.skill}
+                </span>
+              )}
+            </h1>
             <p className="mt-0.5 max-w-[640px] text-[12.5px] leading-relaxed text-ink-soft">
               {t("app.desc")}
             </p>
@@ -89,7 +96,7 @@ export default function App() {
               href={data.client.panel_url}
               target="_blank"
               rel="noopener noreferrer"
-              title={t("app.hubPanelTitle", { url: data.client.panel_url })}
+              title={t("app.hubPanelTitle")}
               className="inline-flex h-7 items-center whitespace-nowrap rounded-lg border border-line-strong bg-surface px-2.5 text-[12.5px] transition-colors hover:bg-hover"
             >
               {t("app.hubPanel")}
