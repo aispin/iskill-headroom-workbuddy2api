@@ -11,8 +11,8 @@
   - 读取：链路健康、账号池、省 token 统计、生效 API Key、模型列表、日志
   - 写入：OAuth 加账号（服务端代持面板会话，用户只点一下）、手动保活 refresh
 
-账号管理、API Key 管理、签到任务等深度操作，跳转 hub 自己的看板完成。
-跳转走本控制台的反向代理（/hub）：自动注入面板会话，用户无需再输面板密码。
+账号管理、API Key 管理、签到任务等深度操作，跳转 hub 自己的看板完成：
+hub 原生支持 ?pwd= 自动登录，跳转链接直接带上面板密码，用户无需再输。
 """
 
 import argparse
@@ -351,7 +351,7 @@ def build_status():
             "chat_url": "http://localhost:%d/v1/chat/completions" % headroom_port,
             "api_key": api_key,
             "api_key_source": key_source,
-            "panel_url": "/hub",
+            "panel_url": "http://127.0.0.1:%d/?pwd=%s" % (hub_port, urllib.parse.quote(panel_pw)),
             "panel_password": panel_pw,
         },
         "runtime": RUNTIME,
@@ -401,7 +401,7 @@ class Handler(BaseHTTPRequestHandler):
                           effective_api_key()[0])
 
     def _serve_static(self, path):
-        """托管 dashboard/dist 构建产物。命中返回 True；未命中返回 False（交给 hub 代理）。"""
+        """托管 dashboard/dist 构建产物。命中返回 True；未命中返回 False（由调用方回 404）。"""
         index = os.path.join(DIST_DIR, "index.html")
         if not os.path.isfile(index):
             self._send(
@@ -430,60 +430,11 @@ class Handler(BaseHTTPRequestHandler):
             self._send(200, fh.read(), ctype)
         return True
 
-    # -- hub 反向代理 --
-    # hub 有意不支持 URL 传面板 token（header-only，防泄漏进浏览器历史/Referer/日志），
-    # 且其 SPA 全部用绝对路径 fetch、无 SSE/WebSocket —— 本控制台做一层透传并注入
-    # X-Panel-Token，即可免登录直达 hub 面板，token 不进 URL。拿不到会话时按原样透传，
-    # hub 前端会自己显示登录页（优雅降级）。
-    _PROXY_FWD_HEADERS = ("Content-Type", "ETag", "Last-Modified", "Cache-Control")
-
-    def _proxy_hub(self, target):
-        hub = self._hub()
-        body = None
-        if self.command in ("POST", "PUT", "PATCH"):
-            length = int(self.headers.get("Content-Length") or 0)
-            body = self.rfile.read(length) if length else None
-        try:
-            tok = hub._panel_token()
-        except Exception:
-            tok = ""
-        headers = {"X-Panel-Token": tok} if tok else {}
-        ctype = self.headers.get("Content-Type")
-        if ctype:
-            headers["Content-Type"] = ctype
-        req = urllib.request.Request(hub.base + target, data=body, headers=headers,
-                                     method=self.command)
-        try:
-            with _NO_PROXY_OPENER.open(req, timeout=120) as resp:
-                self._proxy_response(resp.status, resp.read(), resp.headers)
-        except urllib.error.HTTPError as exc:
-            self._proxy_response(exc.code, exc.read(), exc.headers)
-        except Exception as exc:
-            self._send(502, {"error": "hub 代理失败：%s" % exc})
-
-    def _proxy_response(self, status, data, headers):
-        self.send_response(status)
-        for name in self._PROXY_FWD_HEADERS:
-            val = headers.get(name)
-            if val:
-                self.send_header(name, val)
-        self.send_header("Content-Length", str(len(data)))
-        self.send_header("Cache-Control", "no-store")
-        self.send_header("Permissions-Policy", 'clipboard-write=*')
-        self.end_headers()
-        try:
-            self.wfile.write(data)
-        except BrokenPipeError:
-            pass
-
     # -- 路由 --
     def do_GET(self):
         parsed = urllib.parse.urlparse(self.path)
         path = parsed.path
         query = urllib.parse.parse_qs(parsed.query)
-
-        if path == "/hub":
-            return self._proxy_hub("/")
 
         if path == "/api/status":
             try:
@@ -507,7 +458,7 @@ class Handler(BaseHTTPRequestHandler):
 
         if self._serve_static(path):
             return
-        return self._proxy_hub(self.path)
+        return self._send(404, {"error": "not found"})
 
     def do_POST(self):
         parsed = urllib.parse.urlparse(self.path)
@@ -548,10 +499,7 @@ class Handler(BaseHTTPRequestHandler):
             except Exception as exc:
                 return self._send(500, {"error": str(exc)})
 
-        parsed = urllib.parse.urlparse(self.path)
-        if parsed.path.startswith("/api/"):
-            return self._send(404, {"error": "not found"})
-        return self._proxy_hub(self.path)
+        return self._send(404, {"error": "not found"})
 
 
 def main():

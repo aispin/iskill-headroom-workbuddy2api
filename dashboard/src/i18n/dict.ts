@@ -13,7 +13,7 @@ const zh = {
   "app.statusError": "读取状态失败：{error}",
   "app.loading": "加载中…",
   "app.hubPanel": "hub 面板 ↗",
-  "app.hubPanelTitle": "打开 hub 原生看板（控制台代理 · 免登录）",
+  "app.hubPanelTitle": "打开 hub 原生看板（?pwd= 自动登录）",
   "app.autoOn": "自动刷新：开",
   "app.autoOff": "自动刷新：关",
   // 页脚拆三段，中间那段是超链接
@@ -169,7 +169,7 @@ const en: Dict = {
   "app.statusError": "Failed to read status: {error}",
   "app.loading": "Loading…",
   "app.hubPanel": "hub panel ↗",
-  "app.hubPanelTitle": "Open the native hub dashboard via the console proxy (no login)",
+  "app.hubPanelTitle": "Open the native hub dashboard (auto-login via ?pwd=)",
   "app.autoOn": "Auto-refresh: on",
   "app.autoOff": "Auto-refresh: off",
   "app.footer.pre":
