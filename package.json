@@ -1,5 +1,6 @@
 {
   "name": "iskill-headroom-workbuddy2api",
+  "version": "0.5.0",
   "private": true,
   "type": "module",
   "description": "iskill-headroom-workbuddy2api 落地页实例；promo-page/assets 引擎三件套为 vendored 副本（真源 iskill-promo-page）",
@@ -25,5 +26,15 @@
       "version": "1.0.0",
       "local": "promo-page/assets/icons.js"
     }
-  ]
+  ],
+  "runtime": {
+    "hub": {
+      "repo": "https://github.com/ardeyouxipianyi/workbuddy2api-hub.git",
+      "branch": "main",
+      "pin": "96cbc563634d9796e07a5a10e40891ebcbc4225a"
+    },
+    "headroom": {
+      "pip_spec": "headroom-ai[proxy]==0.40.0"
+    }
+  }
 }

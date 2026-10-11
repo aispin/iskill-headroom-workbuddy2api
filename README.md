@@ -32,7 +32,7 @@ WorkBuddy 客户端 → Headroom(:8787 守住缓存 + 压增量) → workbuddy2a
 | `hwb.ps1` | Windows | PowerShell 入口，也可 `.\hwb.ps1 status` 带动作调用 |
 | `scripts/hwb.py` | 全平台 | **唯一真源**：所有逻辑都在这里（纯标准库） |
 
-> 上游版本由 `versions.json` 锁定：`start` 永远执行锁定版（hub 精确 commit + headroom 精确版本），
+> 上游版本由 `package.json` 的 `runtime` 块锁定：`start` 永远执行锁定版（hub 精确 commit + headroom 精确版本），
 > 升级走 `upgrade` 动作（临时追最新，不写回锁）。详见 SKILL.md「版本锁定与升级」。
 
 菜单选 **0 退出时会连同窗口一起关掉**（是本终端的最后一个窗口时，顺带退出整个终端 App）。

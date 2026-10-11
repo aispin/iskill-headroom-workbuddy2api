@@ -12,7 +12,7 @@
     python3 scripts/hwb.py login        添加上游账号（OAuth）
     python3 scripts/hwb.py dashboard    本地控制台（:8786，默认打开浏览器）
     python3 scripts/hwb.py open         只打开用量看板
-    python3 scripts/hwb.py upgrade      升级上游到最新（临时，不写回 versions.json）
+    python3 scripts/hwb.py upgrade      升级上游到最新（临时，不写回 package.json）
     python3 scripts/hwb.py doctor       环境体检（Python / Node / git / 端口…）
     python3 scripts/hwb.py              无参数 = 交互菜单（双击 .command / .ps1 走这条）
 
@@ -75,18 +75,32 @@ _init_console()
 RUNTIME = Path(os.environ.get("ISKILL_RUNTIME") or (Path.home() / ".iskill-headroom-workbuddy2api"))
 SKILL_DIR = Path(__file__).resolve().parent.parent
 
-# ── 版本锁：versions.json 是唯一定版事实源。start 永远执行锁定版本；
-#    升级 SOP = 测好新版 → 改 versions.json → push 技能仓库（见 SKILL.md「版本锁定」）。
-#    用户显式 `upgrade` 可临时追上游最新，但不写回锁文件，restart/start 即回锁定版。
-def _load_versions() -> dict:
+# ── 版本锁：package.json 的 runtime 块是唯一定版事实源（skill 版本 = 顶层 version 字段）。
+#    start 永远执行锁定版本；升级 SOP = 测好新版 → 改 package.json 的 runtime 块 →
+#    push 技能仓库（见 SKILL.md「版本锁定」）。用户显式 `upgrade` 可临时追上游最新，
+#    但不写回锁文件，restart/start 即回锁定版。
+def _load_lock() -> dict:
+    """读 package.json：返回 {version, hub, headroom}。缺 runtime 块时回读旧 versions.json（半更新兜底）。"""
+    lock: dict = {}
     try:
-        return json.loads((SKILL_DIR / "versions.json").read_text(encoding="utf-8"))
+        pkg = json.loads((SKILL_DIR / "package.json").read_text(encoding="utf-8"))
+        lock = {
+            "version": pkg.get("version") or "",
+            "hub": pkg.get("runtime", {}).get("hub") or {},
+            "headroom": pkg.get("runtime", {}).get("headroom") or {},
+        }
+        if not lock["hub"] and not lock["headroom"]:
+            raise ValueError("package.json 缺 runtime 锁块")
     except Exception:
-        return {}
+        try:
+            lock = json.loads((SKILL_DIR / "versions.json").read_text(encoding="utf-8"))
+        except Exception:
+            lock = {}
+    return lock
 
 
-VERSIONS = _load_versions()
-SKILL_VERSION = str(VERSIONS.get("skill") or "").strip()
+VERSIONS = _load_lock()
+SKILL_VERSION = str(VERSIONS.get("version") or VERSIONS.get("skill") or "").strip()
 _HUB_LOCK = VERSIONS.get("hub") or {}
 _HR_LOCK = VERSIONS.get("headroom") or {}
 HUB_REPO = str(_HUB_LOCK.get("repo") or "https://github.com/ardeyouxipianyi/workbuddy2api-hub.git")
@@ -626,7 +640,7 @@ def do_start(open_console: bool = True, open_browser: bool = True) -> int:
         bad("找不到 git —— 需要它来拉取 workbuddy2api-hub 源码")
         return 1
 
-    # ── 1. 准备 hub 源码（按 versions.json 锁定的 commit；锁失败自动回退 branch tip）
+    # ── 1. 准备 hub 源码（按 package.json 锁定的 commit；锁失败自动回退 branch tip）
     step(1, "准备 workbuddy2api-hub 源码")
     if not (HUB_DIR / "wb_proxy.py").exists():
         info("拉取 workbuddy2api-hub 源码（零依赖，约几 MB）…")
@@ -680,7 +694,7 @@ def do_start(open_console: bool = True, open_browser: bool = True) -> int:
         except Exception:
             pass
 
-    # ── 3. Headroom（按 versions.json 锁定的精确版本；偏离即对齐）
+    # ── 3. Headroom（按 package.json 锁定的精确版本；偏离即对齐）
     step(3, "准备 Headroom（上下文压缩层）")
     _, vpy, _, _ = venv_paths()
     hexe = headroom_cmd()
@@ -1157,9 +1171,9 @@ def do_dashboard(action: str = "start", foreground: bool = False, open_browser: 
 
 
 # ─────────────────────────────────────────────────────────────
-# 动作：upgrade（显式追上游最新 —— 仅本次运行时，不写回 versions.json）
+# 动作：upgrade（显式追上游最新 —— 仅本次运行时，不写回 package.json）
 def do_upgrade() -> int:
-    print("[iskill-headroom-workbuddy2api] 升级上游（临时最新，不改动 versions.json）")
+    print("[iskill-headroom-workbuddy2api] 升级上游（临时最新，不改动 package.json）")
     if SKILL_VERSION:
         print(f"  本技能版本    : {SKILL_VERSION}")
 
@@ -1173,7 +1187,7 @@ def do_upgrade() -> int:
     ok(f"hub → {hub_head()}")
     if HUB_PIN:
         info(f"锁定版为 {HUB_PIN[:10]}；restart / start 后回到锁定版。若新版没问题，"
-             f"把 versions.json 的 hub.pin 固化为上游 tip")
+             f"把 package.json 的 hub.pin 固化为上游 tip")
 
     step(2, "Headroom → PyPI 最新")
     _, vpy, _, _ = venv_paths()
@@ -1190,7 +1204,7 @@ def do_upgrade() -> int:
     ok(f"headroom → {cur or '最新'}")
     want = PIP_SPEC.split("==", 1)[1] if "==" in PIP_SPEC else ""
     if want and cur and cur != want:
-        info(f"锁定版是 {want}。若新版没问题，把 versions.json 的 headroom.pip_spec 固化为 {base}=={cur}")
+        info(f"锁定版是 {want}。若新版没问题，把 package.json 的 headroom.pip_spec 固化为 {base}=={cur}")
 
     print(f"\n  重启生效：{launcher_hint('restart')}")
     return 0
@@ -1207,7 +1221,7 @@ def do_doctor() -> int:
     print(f"  venv          : {'已建' if VENV.exists() else '未建'}  ({venv_paths()[0]})")
     print(f"  Headroom      : {'已装 ' + (headroom_version() or '') if headroom_cmd() else '未装'}")
     print()
-    print("  版本锁（versions.json）：")
+    print("  版本锁（package.json）：")
     print(f"    本技能  : {SKILL_VERSION or '—'}")
     hub_short = (hub_head().split(" ")[0] if hub_head() else "")
     if HUB_PIN:
@@ -1332,7 +1346,7 @@ def main() -> int:
     p_dash.add_argument("--fg", action="store_true", help="前台运行")
     p_dash.add_argument("--no-open", action="store_true", help="启动后不自动打开浏览器")
     sub.add_parser("open", help="打开用量看板")
-    sub.add_parser("upgrade", help="升级上游到最新（临时，不写回 versions.json）")
+    sub.add_parser("upgrade", help="升级上游到最新（临时，不写回 package.json）")
     sub.add_parser("doctor", help="环境体检")
     sub.add_parser("menu", help="交互菜单")
 
