@@ -104,38 +104,37 @@ Windows PowerShell 5.1 在没有 BOM 时按 **ANSI（中文机器上是 GBK）**
 ### 8. 「退出菜单时关掉窗口」——两平台的代价完全不对等
 
 用户双击进来、菜单里选 0 退出，期望窗口跟着关掉（最后一个窗口则退掉整个终端 App）。
-**macOS 上这件事会误伤**：用户也可能在自己已经开着的终端里敲 `./hwb.command`，
-那时「关窗口」= 连他的 shell 会话、历史、当前目录一起干掉。所以做法是：
+macOS 上关窗靠 AppleScript，误伤面必须压到最小，所以做法是：
 
 - `hwb.py` 只用一个**约定退出码** `EXIT_MENU_QUIT = 10` 表达「用户主动退出菜单」，
   自己不碰任何关窗动作（Python 不该知道宿主是谁）。
-- `hwb.command` 收到 rc=10 后判定场景（`classify_open`）：
-  - **direct（双击）**：父进程是 `login`（⚠️ Terminal 双击 .command 时，父进程是它的
-    **`login` 包装进程**，不是 Terminal 本身 —— 白名单漏了它就会判错，死在
-    `[Process completed]`）、终端 App 本身，或「父 shell 的命令行里含脚本名」
-    （shell 被专门拉来跑本脚本的形态）→ 按 **tty 精确关窗**（`ps -o tty=` 拿自己的
-    tty，AppleScript 遍历窗口/标签匹配，避免 `close front window` 关错用户切走的窗口；
-    只剩这一个标签则 `quit` 整个 App）。
-  - **manual（手动）**：父进程是交互 shell 且其命令行与脚本无关 → 直接退出，
-    提示符自然回来（连回车都不用等）。
-  - **unknown（判不了）**：既不冒险关窗、也不留死窗口 —— `exec "${SHELL:-/bin/zsh}"`
-    换成交互 shell，窗口还能继续打字。
+- `hwb.command` 收到 rc=10 且**无参数、交互终端** → 按 **tty 精确关窗**：
+  1. **宿主白名单**：只对 Terminal.app（`TERM_PROGRAM=Apple_Terminal`）与 iTerm2
+     执行 AppleScript；SSH 会话（`SSH_CONNECTION` 非空）没有本地窗口可关，
+     VS Code 等第三方终端有自己的窗口协议，一律跳过；
+  2. AppleScript 遍历窗口/标签按 **tty 匹配**（`tty` 拿全路径，`ps -o tty=` 兜底），
+     避免 `close front window` 关错用户切走的窗口；
+  3. 先试 `close t`（多标签窗口更礼貌），失败则 `close w`（关整个窗口）；
+  4. **实际关掉了**且这是最后一个窗口才 `quit` 整个 App —— quit 必须以 didClose
+     为前提，否则关窗被权限拦下时会把整个终端 App 一起带走。
 - ⚠️ **关窗的顺序是「先 exit，再让后台 osascript 关」**，中间隔 ~0.3s：
   ```bash
   close_terminal_window   # 内部是 ( sleep 0.3; osascript … ) &
   exit 0                  #  ← 必须 exit，绝不能 exec 一个交互 shell
   ```
-  踩过：为了「关不掉也不留死窗口」加了 `exec zsh` 兜底 —— 结果 exec 出来的 shell
+  踩过：为了「关不掉也不留死窗口」加 `exec zsh` 兜底 —— 结果 exec 出来的 shell
   是**活动进程**，Terminal 关窗时判定「窗口里有正在运行的进程」，弹出确认框要用户再点一次。
-  正确姿势是让本 shell 先退出、窗口变空闲，osascript 再来关，全程静默。
-  **「不留死窗口」的兜底只用在 unknown 分支**（那里没有 osascript 参与，exec 不会引发确认框）。
+  正确姿势是让本 shell 先退出、窗口变空闲，osascript 再来关，全程静默；
+  关窗失败就让它失败（日志里有原因），不要用 exec 兜底。
 - ⚠️ **`osascript rc=0` ≠ 窗口真的关了**。踩过：把 `close t` 包在 `try … end try` 里，
   AppleScript 报错被吞、退出码仍是 0，于是「判定对 + rc=0 + 窗口没关」，完全看不出哪错了。
-  正确做法：① 关窗动作**不要**用 try 吞错；② AppleScript `return` 一个状态串
-  （`didClose=` / `nWin=` / 所有 tab 的 tty 列表），并把它连同 rc 一起**写进日志**。
+  正确做法：① `try` 只包住单次 close 动作，结果落进 `didClose` 标志；
+  ② AppleScript `return` 一个状态串（`didClose=` / `nWin=` / 所有 tab 的 tty 列表），
+  并把它连同 rc 一起**写进日志**。
 - ⚠️ 关**标签页**（`close t`）在 Terminal 上并不总是生效；可靠的是命中 tty 后 `close w`
   （关整个窗口）—— 这是从 `migrate_presets.command` 那里学来的已验证写法。
-  现版本策略：先试 `close t`（多标签窗口更礼貌），失败则 `close w`，只剩一个窗口时 `quit`。
+  策略：先试 `close t`（多标签窗口更礼貌），失败则 `close w`；
+  **didClose 为真**且只剩一个窗口时才 `quit` 整个 App。
 - **Windows 不用判父进程**：双击 `hwb.cmd` 起的窗口，脚本一结束 cmd 自己就关；
   在已有 PowerShell 里跑 `.\hwb.ps1` 则只是返回提示符。窗口生命周期天然分开，
   只要菜单退出时**跳过 `Read-Host`** 即可（否则那个「按回车键关闭」会挡住自动关闭）。
