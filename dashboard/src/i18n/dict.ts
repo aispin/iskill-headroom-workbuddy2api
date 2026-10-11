@@ -20,7 +20,9 @@ const zh = {
   "app.footer.pre":
     "本控制台只监听 127.0.0.1，仅供本机使用。深度管理（API Key 增删、模型限制、每日限额、签到任务）请用 ",
   "app.footer.panel": "hub 原生看板",
-  "app.footer.post": "。",
+  "app.footer.post": "（免登录直达）。",
+  "app.footer.pw": "面板密码：{pw}",
+  "app.footer.ver.skill": "本体",
 
   // ── 顶栏控件 ──
   "app.theme.aria": "主题",
@@ -158,8 +160,6 @@ const zh = {
   "logs.tab.hub": "hub 日志",
   "logs.tab.headroom": "Headroom 日志",
   "logs.refresh": "刷新",
-  "logs.panelLink": "打开 hub 原生看板（账号 / Key / 用量 / 签到）",
-  "logs.panelPassword": "面板密码：{pw}",
 };
 
 export type Dict = Record<keyof typeof zh, string>;
@@ -179,7 +179,9 @@ const en: Dict = {
   "app.footer.pre":
     "This console listens on 127.0.0.1 only and is for local use. For deep management (API keys, model limits, daily quotas, check-in tasks) use the ",
   "app.footer.panel": "native hub dashboard",
-  "app.footer.post": ".",
+  "app.footer.post": " (no login required).",
+  "app.footer.pw": "Panel password: {pw}",
+  "app.footer.ver.skill": "skill",
 
   // ── Header controls ──
   "app.theme.aria": "Theme",
@@ -320,8 +322,6 @@ const en: Dict = {
   "logs.tab.hub": "hub log",
   "logs.tab.headroom": "Headroom log",
   "logs.refresh": "Refresh",
-  "logs.panelLink": "Open the native hub dashboard (accounts / keys / usage / check-in)",
-  "logs.panelPassword": "Panel password: {pw}",
 };
 
 export const dicts = { zh, en } as const;

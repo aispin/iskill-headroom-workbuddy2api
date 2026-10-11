@@ -19,6 +19,9 @@ function Banner({ tone, children }: { tone: "ok" | "warn" | "err"; children: Rea
   return <div className={`rounded-lg border px-3.5 py-2.5 text-[13px] ${cls}`}>{children}</div>;
 }
 
+const HUB_REPO_URL = "https://github.com/ardeyouxipianyi/workbuddy2api-hub";
+const HEADROOM_REPO_URL = "https://github.com/headroomlabs-ai/headroom";
+
 export default function App() {
   const { data, error, auto, setAuto, refresh, updatedAt, loading } = useStatus(5000);
   const { t, lang, setLang } = useI18n();
@@ -150,25 +153,62 @@ export default function App() {
 
         <ClientCard data={data} />
         <AccountsTable data={data} />
-        <LogsCard data={data} onChanged={() => void refresh()} tick={logTick} />
+        <LogsCard onChanged={() => void refresh()} tick={logTick} />
       </div>
 
-      <p className="mt-5 rounded-lg border border-dashed border-line-strong bg-sunken px-3 py-2.5 text-[12.5px] text-ink-soft">
-        {t("app.footer.pre")}
-        {data?.client.panel_url ? (
-          <a
-            href={data.client.panel_url}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="text-brand underline underline-offset-2 hover:no-underline"
-          >
-            {t("app.footer.panel")}
-          </a>
-        ) : (
-          t("app.footer.panel")
+      <footer className="mt-5 rounded-lg border border-dashed border-line-strong bg-sunken px-3 py-2.5 text-[12.5px] text-ink-soft">
+        <p className="m-0">
+          {t("app.footer.pre")}
+          {data?.client.panel_url ? (
+            <a
+              href={data.client.panel_url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-brand underline underline-offset-2 hover:no-underline"
+            >
+              {t("app.footer.panel")}
+            </a>
+          ) : (
+            t("app.footer.panel")
+          )}
+          {t("app.footer.post")}
+          {data?.client.panel_password && (
+            <span className="ml-1 font-mono text-[12px]">
+              {t("app.footer.pw", { pw: data.client.panel_password })}
+            </span>
+          )}
+        </p>
+        {data?.versions && (
+          <p className="m-0 mt-1.5">
+            {t("app.footer.ver.skill")}{" "}
+            <span className="font-mono">v{data.versions.skill}</span>
+            <span className="mx-1.5">·</span>
+            <a
+              href={HUB_REPO_URL}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-brand underline underline-offset-2 hover:no-underline"
+            >
+              workbuddy2api-hub
+            </a>{" "}
+            <span className="font-mono">
+              v{data.versions.hub.running || data.versions.hub.pin || "—"}
+            </span>
+            <span className="mx-1.5">·</span>
+            <a
+              href={HEADROOM_REPO_URL}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-brand underline underline-offset-2 hover:no-underline"
+            >
+              headroom
+            </a>{" "}
+            <span className="font-mono">
+              v{data.versions.headroom.running || data.versions.headroom.locked || "—"}
+            </span>
+          </p>
         )}
-        {t("app.footer.post")}
-      </p>
+      </footer>
     </div>
   );
 }

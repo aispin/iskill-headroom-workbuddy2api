@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { api } from "../api";
 import { useT } from "../i18n";
-import type { StatusPayload } from "../types";
 import { Button, Card } from "./ui";
 
 type LogName = "hub" | "headroom";
@@ -13,15 +12,7 @@ const ACTION_KEY: Record<Action, "logs.action.start" | "logs.action.stop" | "log
   restart: "logs.action.restart",
 };
 
-export function LogsCard({
-  data,
-  onChanged,
-  tick,
-}: {
-  data: StatusPayload | null;
-  onChanged: () => void;
-  tick: number;
-}) {
+export function LogsCard({ onChanged, tick }: { onChanged: () => void; tick: number }) {
   const t = useT();
   const [tab, setTab] = useState<LogName>("hub");
   const [text, setText] = useState("—");
@@ -98,20 +89,6 @@ export function LogsCard({
       <pre className="thin-scroll max-h-[300px] overflow-auto rounded-lg border border-line bg-sunken p-3 font-mono text-[12px] leading-relaxed whitespace-pre-wrap break-all">
         {text}
       </pre>
-
-      <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 text-[12.5px]">
-        <a
-          className="text-brand hover:underline"
-          href={data?.client.panel_url ?? "#"}
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          {t("logs.panelLink")}
-        </a>
-        <span className="text-ink-soft">
-          {t("logs.panelPassword", { pw: data?.client.panel_password ?? t("common.dash") })}
-        </span>
-      </div>
     </Card>
   );
 }
