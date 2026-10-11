@@ -12,6 +12,7 @@
     python3 scripts/hwb.py login        添加上游账号（OAuth）
     python3 scripts/hwb.py dashboard    本地控制台（:8786，默认打开浏览器）
     python3 scripts/hwb.py open         只打开用量看板
+    python3 scripts/hwb.py upgrade      升级上游到最新（临时，不写回 versions.json）
     python3 scripts/hwb.py doctor       环境体检（Python / Node / git / 端口…）
     python3 scripts/hwb.py              无参数 = 交互菜单（双击 .command / .ps1 走这条）
 
@@ -74,8 +75,24 @@ _init_console()
 RUNTIME = Path(os.environ.get("ISKILL_RUNTIME") or (Path.home() / ".iskill-headroom-workbuddy2api"))
 SKILL_DIR = Path(__file__).resolve().parent.parent
 
-HUB_REPO = "https://github.com/ardeyouxipianyi/workbuddy2api-hub.git"
-HUB_BRANCH = os.environ.get("HUB_BRANCH", "main")
+# ── 版本锁：versions.json 是唯一定版事实源。start 永远执行锁定版本；
+#    升级 SOP = 测好新版 → 改 versions.json → push 技能仓库（见 SKILL.md「版本锁定」）。
+#    用户显式 `upgrade` 可临时追上游最新，但不写回锁文件，restart/start 即回锁定版。
+def _load_versions() -> dict:
+    try:
+        return json.loads((SKILL_DIR / "versions.json").read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+
+
+VERSIONS = _load_versions()
+SKILL_VERSION = str(VERSIONS.get("skill") or "").strip()
+_HUB_LOCK = VERSIONS.get("hub") or {}
+_HR_LOCK = VERSIONS.get("headroom") or {}
+HUB_REPO = str(_HUB_LOCK.get("repo") or "https://github.com/ardeyouxipianyi/workbuddy2api-hub.git")
+HUB_BRANCH = os.environ.get("HUB_BRANCH") or str(_HUB_LOCK.get("branch") or "main")
+HUB_PIN = str(_HUB_LOCK.get("pin") or "").strip()
+PIP_SPEC = str(_HR_LOCK.get("pip_spec") or "headroom-ai[proxy]").strip()
 HUB_DIR = RUNTIME / "workbuddy2api-hub"
 HUB_ACCOUNTS = RUNTIME / "hub-accounts"      # 账号凭证 + settings.json（与源码分离，升级不丢）
 HUB_USAGE = RUNTIME / "hub-usage"            # 请求流水
@@ -102,8 +119,6 @@ EXIT_MENU_QUIT = 10
 #   token        —— 压缩历史后再重新冻结，真的压 token（agent 会话实测省 ~78%），
 #                   代价是每次压缩可能让上游缓存失效、需要重算。
 HEADROOM_MODE = os.environ.get("HEADROOM_MODE", "cache")
-
-PIP_SPEC = "headroom-ai[proxy]"
 
 
 # ─────────────────────────────────────────────────────────────
@@ -225,6 +240,20 @@ def headroom_cmd() -> list[str] | None:
         except Exception:
             pass
     return None
+
+
+def headroom_version() -> str:
+    """已装 headroom 的版本号（如 '0.40.0'）；取不到返回 ''。"""
+    hexe = headroom_cmd()
+    if hexe is None:
+        return ""
+    try:
+        out = subprocess.run(hexe + ["--version"], capture_output=True, text=True,
+                             timeout=60).stdout or ""
+        m = re.search(r"(\d+\.\d+\.\d+)", out)
+        return m.group(1) if m else ""
+    except Exception:
+        return ""
 
 
 # ─────────────────────────────────────────────────────────────
@@ -505,9 +534,10 @@ def find_git_proxy() -> str:
     return ""
 
 
-def sync_hub() -> bool:
-    """原地 fetch，不依赖 rm -rf（容忍上次中断留下的半成品目录）。
-    网络三级降级：直连 → HTTP/1.1 → 本地代理。"""
+def sync_hub(pin: str = "") -> bool:
+    """原地 fetch + checkout，不依赖 rm -rf（容忍上次中断留下的半成品目录）。
+    pin 非空时优先 fetch 锁定 sha（start 走版本锁）；失败自动回退 branch tip 并返回成功——
+    但调用方可据返回目标判断。网络三级降级：直连 → HTTP/1.1 → 本地代理。"""
     HUB_DIR.mkdir(parents=True, exist_ok=True)
     git = shutil.which("git")
     if not git:
@@ -531,15 +561,17 @@ def sync_hub() -> bool:
     if proxy:
         strategies.append(["-c", f"http.proxy={proxy}", "-c", "http.version=HTTP/1.1"])
 
-    for extra in strategies:
-        rc = subprocess.call([git, "-C", str(HUB_DIR), *extra, "fetch", "--depth", "1",
-                              "origin", HUB_BRANCH],
-                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        if rc == 0:
-            subprocess.call([git, "-C", str(HUB_DIR), "-c", "advice.detachedHead=false",
-                             "checkout", "-q", "-f", "FETCH_HEAD"],
-                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            return True
+    targets: list[str] = ([pin] if pin else []) + [HUB_BRANCH]
+    for target in targets:
+        for extra in strategies:
+            rc = subprocess.call([git, "-C", str(HUB_DIR), *extra, "fetch", "--depth", "1",
+                                  "origin", target],
+                                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            if rc == 0:
+                subprocess.call([git, "-C", str(HUB_DIR), "-c", "advice.detachedHead=false",
+                                 "checkout", "-q", "-f", "FETCH_HEAD"],
+                                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                return True
     return False
 
 
@@ -594,11 +626,11 @@ def do_start(open_console: bool = True, open_browser: bool = True) -> int:
         bad("找不到 git —— 需要它来拉取 workbuddy2api-hub 源码")
         return 1
 
-    # ── 1. 准备 hub 源码
+    # ── 1. 准备 hub 源码（按 versions.json 锁定的 commit；锁失败自动回退 branch tip）
     step(1, "准备 workbuddy2api-hub 源码")
     if not (HUB_DIR / "wb_proxy.py").exists():
         info("拉取 workbuddy2api-hub 源码（零依赖，约几 MB）…")
-        if not sync_hub():
+        if not sync_hub(HUB_PIN):
             bad("拉取失败。若网络受限，先设代理再重试：GIT_PROXY=http://127.0.0.1:端口")
             return 1
         if not (HUB_DIR / "wb_proxy.py").exists():
@@ -607,8 +639,9 @@ def do_start(open_console: bool = True, open_browser: bool = True) -> int:
         ok(f"源码就绪（{hub_head()}）")
     else:
         ok(f"源码已存在（{HUB_DIR}）")
-        if sync_hub():
-            ok(f"已同步：{hub_head()}")
+        if sync_hub(HUB_PIN):
+            mark = "［锁定版］" if HUB_PIN else ""
+            ok(f"已同步：{hub_head()} {mark}".rstrip())
         else:
             warn("同步失败（离线或代理受限），继续用本地当前版本")
 
@@ -647,34 +680,38 @@ def do_start(open_console: bool = True, open_browser: bool = True) -> int:
         except Exception:
             pass
 
-    # ── 3. Headroom
+    # ── 3. Headroom（按 versions.json 锁定的精确版本；偏离即对齐）
     step(3, "准备 Headroom（上下文压缩层）")
-    _, vpy, vpip, _ = venv_paths()
+    _, vpy, _, _ = venv_paths()
     hexe = headroom_cmd()
+    want = PIP_SPEC.split("==", 1)[1] if "==" in PIP_SPEC else ""
     if hexe is not None:
-        try:
-            ver = subprocess.run(hexe + ["--version"], capture_output=True, text=True,
-                                 timeout=60).stdout.strip().splitlines()
-            ok(f"Headroom 已就绪（{ver[0] if ver else 'ok'}）")
-        except Exception:
-            ok("Headroom 已就绪")
+        cur = headroom_version()
+        if want and cur and cur != want:
+            info(f"Headroom {cur} ≠ 锁定版 {want}，对齐中…")
+            rc = run_spin(f"安装 {PIP_SPEC}", [str(vpy), "-m", "pip", "install", "-q", PIP_SPEC],
+                          log=LOGS / "headroom-install.log")
+            if rc != 0:
+                warn(f"对齐失败，继续用当前 {cur}（日志：{LOGS / 'headroom-install.log'}）")
+            else:
+                ok(f"已对齐锁定版 {want}")
+        else:
+            ok(f"Headroom 已就绪（{cur or 'ok'}）" + (f"［锁定 {want}］" if want else ""))
     else:
-        if not vpip.exists():
-            if VENV.exists():
-                shutil.rmtree(VENV, ignore_errors=True)
+        if not vpy.exists():
             info(f"创建 venv（{PYTHON_BIN}）")
             if subprocess.call([PYTHON_BIN, "-m", "venv", str(VENV)]) != 0:
                 bad("venv 创建失败")
                 return 1
-            _, vpy, vpip, _ = venv_paths()
-        okc = run_spin(f"安装 {PIP_SPEC}（首次约 1–2 分钟，hnswlib 需本地编译）",
-                       [str(vpip), "install", "-q", "--upgrade", "pip"],
+            _, vpy, _, _ = venv_paths()
+        okc = run_spin(f"升级 pip（首次约 1–2 分钟，hnswlib 需本地编译）",
+                       [str(vpy), "-m", "pip", "install", "-q", "--upgrade", "pip"],
                        log=LOGS / "headroom-install.log")
         if okc != 0:
             bad(f"pip 升级失败，看日志：{LOGS / 'headroom-install.log'}")
             return 1
         rc = run_spin(f"安装 {PIP_SPEC}",
-                      [str(vpip), "install", "-q", PIP_SPEC],
+                      [str(vpy), "-m", "pip", "install", "-q", PIP_SPEC],
                       log=LOGS / "headroom-install.log")
         if rc != 0:
             bad(f"Headroom 安装失败，看日志：{LOGS / 'headroom-install.log'}")
@@ -682,7 +719,7 @@ def do_start(open_console: bool = True, open_browser: bool = True) -> int:
                 info("Windows 若卡在 hnswlib 编译：装 Visual Studio Build Tools（C++ 生成工具）后重试，"
                      "或 pip install --only-binary :all: hnswlib 先拿到 wheel")
             return 1
-        ok("Headroom 安装完成")
+        ok(f"Headroom 安装完成（{headroom_version() or PIP_SPEC}）")
 
     if headroom_cmd() is None:
         bad("venv 里找不到 headroom 可执行文件或模块")
@@ -893,6 +930,10 @@ def do_status(raw: bool = False) -> int:
     elif isinstance(health, dict) and "_error" in health:
         print(f"  hub 未响应：{health['_error']}")
     else:
+        hub_short = (hub_head().split(" ")[0] if hub_head() else "")
+        if hub_short:
+            hub_flag = "（在锁）" if (HUB_PIN and HUB_PIN.startswith(hub_short)) else ("（偏离锁定）" if HUB_PIN else "")
+            print(f"  hub 版本      : {hub_short}{hub_flag}")
         total = health.get("accounts", 0)
         ready = health.get("accounts_ready", 0)
         print(f"  账号池        : 共 {total} 个，可用 {ready} 个")
@@ -927,6 +968,11 @@ def do_status(raw: bool = False) -> int:
         req = stats.get("requests", {}) or {}
         tok = stats.get("tokens", {}) or {}
         comp = s.get("compression", {}) or {}
+        hr_cur = headroom_version()
+        hr_want = PIP_SPEC.split("==", 1)[1] if "==" in PIP_SPEC else ""
+        if hr_cur:
+            hr_flag = "（在锁）" if (hr_want and hr_cur == hr_want) else ("（偏离锁定）" if hr_want else "")
+            print(f"  headroom 版本 : {hr_cur}{hr_flag}")
         print(f"  请求          : {req.get('total', 0)}  （压缩 {comp.get('requests_compressed', 0)} 次"
               f" / 失败 {req.get('failed', 0)}）")
         print(f"  压缩前 token  : {tok.get('total_before_compression', 0)}")
@@ -1111,6 +1157,46 @@ def do_dashboard(action: str = "start", foreground: bool = False, open_browser: 
 
 
 # ─────────────────────────────────────────────────────────────
+# 动作：upgrade（显式追上游最新 —— 仅本次运行时，不写回 versions.json）
+def do_upgrade() -> int:
+    print("[iskill-headroom-workbuddy2api] 升级上游（临时最新，不改动 versions.json）")
+    if SKILL_VERSION:
+        print(f"  本技能版本    : {SKILL_VERSION}")
+
+    step(1, "workbuddy2api-hub → 上游 branch tip")
+    if not shutil.which("git"):
+        bad("找不到 git")
+        return 1
+    if not sync_hub(""):
+        bad("hub 同步失败（离线或代理受限），本地版本未动")
+        return 1
+    ok(f"hub → {hub_head()}")
+    if HUB_PIN:
+        info(f"锁定版为 {HUB_PIN[:10]}；restart / start 后回到锁定版。若新版没问题，"
+             f"把 versions.json 的 hub.pin 固化为上游 tip")
+
+    step(2, "Headroom → PyPI 最新")
+    _, vpy, _, _ = venv_paths()
+    if not vpy.exists():
+        bad("venv 未建 —— 先 start 一次再 upgrade")
+        return 1
+    base = PIP_SPEC.split("==", 1)[0]
+    rc = run_spin(f"升级 {base}", [str(vpy), "-m", "pip", "install", "-q", "-U", base],
+                  log=LOGS / "headroom-install.log")
+    if rc != 0:
+        bad(f"升级失败，看日志：{LOGS / 'headroom-install.log'}")
+        return 1
+    cur = headroom_version()
+    ok(f"headroom → {cur or '最新'}")
+    want = PIP_SPEC.split("==", 1)[1] if "==" in PIP_SPEC else ""
+    if want and cur and cur != want:
+        info(f"锁定版是 {want}。若新版没问题，把 versions.json 的 headroom.pip_spec 固化为 {base}=={cur}")
+
+    print(f"\n  重启生效：{launcher_hint('restart')}")
+    return 0
+
+
+# ─────────────────────────────────────────────────────────────
 # 动作：doctor（环境体检）
 def do_doctor() -> int:
     print("[iskill-headroom-workbuddy2api] 环境体检")
@@ -1119,7 +1205,19 @@ def do_doctor() -> int:
     print(f"  运行时目录    : {RUNTIME}  ({'存在' if RUNTIME.exists() else '不存在（首次 start 会创建）'})")
     _, vpy, vpip, _ = venv_paths()
     print(f"  venv          : {'已建' if VENV.exists() else '未建'}  ({venv_paths()[0]})")
-    print(f"  Headroom      : {'已装' if headroom_cmd() else '未装'}")
+    print(f"  Headroom      : {'已装 ' + (headroom_version() or '') if headroom_cmd() else '未装'}")
+    print()
+    print("  版本锁（versions.json）：")
+    print(f"    本技能  : {SKILL_VERSION or '—'}")
+    hub_short = (hub_head().split(" ")[0] if hub_head() else "")
+    if HUB_PIN:
+        hub_flag = "✓ 在锁" if hub_short and HUB_PIN.startswith(hub_short) else "⚠ 偏离锁定（start 会自动回到锁）"
+        print(f"    hub     : {hub_short or '未拉取'}  锁 {HUB_PIN[:10]}  {hub_flag}")
+    hr_cur = headroom_version()
+    hr_want = PIP_SPEC.split("==", 1)[1] if "==" in PIP_SPEC else ""
+    if hr_want:
+        hr_flag = "✓ 在锁" if hr_cur == hr_want else "⚠ 偏离锁定（start 会自动对齐）"
+        print(f"    headroom: {hr_cur or '未装'}  锁 {hr_want}  {hr_flag}")
     print()
     print("  外部依赖：")
     for label, exe in (("git", "git"), ("node", "node"), ("npm", "npm"), ("ffmpeg", "ffmpeg")):
@@ -1139,7 +1237,7 @@ def do_doctor() -> int:
         p = SKILL_DIR / f
         print(f"    {f:<14}: {'✓ 存在' if p.exists() else '—'}")
     print()
-    print(f"  提示：非 macOS 平台没有剪贴板/抓包等苹果专属能力，功能不受影响。")
+    print(f"  提示：非 macOS 平台没有剪贴板等苹果专属能力，功能不受影响。")
     return 0
 
 
@@ -1171,6 +1269,7 @@ MENU = [
     ("6", "添加上游账号（OAuth）", lambda: do_login()),
     ("7", "打开用量看板", lambda: do_open_panel()),
     ("8", "环境体检", lambda: do_doctor()),
+    ("9", "升级上游（临时最新，不改动版本锁）", lambda: do_upgrade()),
 ]
 
 
@@ -1187,7 +1286,7 @@ def do_menu() -> int:
         print("   0) 退出")
         print()
         try:
-            choice = input("  请选择 [0-8]: ").strip()
+            choice = input("  请选择 [0-9]: ").strip()
         except (EOFError, KeyboardInterrupt):
             print()
             return EXIT_MENU_QUIT
@@ -1233,6 +1332,7 @@ def main() -> int:
     p_dash.add_argument("--fg", action="store_true", help="前台运行")
     p_dash.add_argument("--no-open", action="store_true", help="启动后不自动打开浏览器")
     sub.add_parser("open", help="打开用量看板")
+    sub.add_parser("upgrade", help="升级上游到最新（临时，不写回 versions.json）")
     sub.add_parser("doctor", help="环境体检")
     sub.add_parser("menu", help="交互菜单")
 
@@ -1262,6 +1362,8 @@ def main() -> int:
         return do_dashboard("start", foreground=args.fg, open_browser=not args.no_open)
     if a == "open":
         return do_open_panel()
+    if a == "upgrade":
+        return do_upgrade()
     if a == "doctor":
         return do_doctor()
     ap.print_help()

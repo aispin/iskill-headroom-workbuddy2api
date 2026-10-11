@@ -1,0 +1,11 @@
+{
+  "skill": "0.5.0",
+  "hub": {
+    "repo": "https://github.com/ardeyouxipianyi/workbuddy2api-hub.git",
+    "branch": "main",
+    "pin": "96cbc563634d9796e07a5a10e40891ebcbc4225a"
+  },
+  "headroom": {
+    "pip_spec": "headroom-ai[proxy]==0.40.0"
+  }
+}

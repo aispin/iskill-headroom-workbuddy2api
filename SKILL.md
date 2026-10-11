@@ -433,6 +433,20 @@ GIT_PROXY=http://127.0.0.1:10080 bash $S/scripts/start.sh
 
 ---
 
+## 版本锁定与升级
+
+上游版本由仓库根的 **`versions.json`** 锁定（唯一定版事实源）：
+
+| 字段 | 锁什么 |
+|---|---|
+| `skill` | 本技能自身版本号 |
+| `hub.pin` | workbuddy2api-hub 的精确 commit |
+| `headroom.pip_spec` | headroom-ai 精确版本（如 `headroom-ai[proxy]==0.40.0`） |
+
+- **`start` 永远执行锁定版本**：hub 按 pin 的 sha fetch + checkout（GitHub 支持按 sha fetch；失败自动回退 branch tip 并告警）；headroom 已装版本 ≠ 锁版本时自动对齐。
+- **升级 SOP（由技能作者控制）**：本地测好新版 hub/headroom → 改 `versions.json` → push 技能仓库。用户更新技能即拿到新锁。
+- **用户想尝鲜**：`hwb.py upgrade`（或菜单 9）临时追上游最新，**不写回锁文件**；`restart`/`start` 即回锁定版。`doctor` / `status` 会显示「在锁 / 偏离锁定」。
+
 ## 依赖同步
 
 本仓库 `promo-page/assets/{app.js,style.css,icons.js}` 是 [iskill-promo-page](https://github.com/aispin/iskill-promo-page)
