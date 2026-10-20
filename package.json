@@ -31,10 +31,10 @@
     "hub": {
       "repo": "https://github.com/ardeyouxipianyi/workbuddy2api-hub.git",
       "branch": "main",
-      "pin": "96cbc563634d9796e07a5a10e40891ebcbc4225a"
+      "pin": "af706fc31e4a22cb2dea7442361b2b15185c3cee"
     },
     "headroom": {
-      "pip_spec": "headroom-ai[proxy]==0.40.0"
+      "pip_spec": "headroom-ai[proxy]==0.41.0"
     }
   }
 }
